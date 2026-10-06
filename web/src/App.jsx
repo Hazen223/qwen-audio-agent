@@ -1491,6 +1491,15 @@ export default function App() {
           ? <OrbControlIcon type="microphone" muted={!voiceEnabled} />
           : voiceControlLabel}
       </button>
+      {voice.inputReady && <small className="echo-status" role="status">
+        {t(voice.echoMode === 'all'
+          ? '系统声音消除模式 · 效果需实测'
+          : voice.echoMode === 'unknown'
+            ? '回声消除状态未知，建议使用耳机'
+            : voice.echoMode === 'off'
+              ? '视频防误听未启用，建议使用耳机'
+              : '视频防误听：基础模式，建议使用耳机')}
+      </small>}
       {videoCallSupported && <button
         className={`video-toggle${videoCallOpen ? ' active' : ''}`}
         aria-pressed={videoCallOpen}

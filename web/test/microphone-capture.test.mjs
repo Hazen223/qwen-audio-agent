@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  acquireEchoCancelledMicrophone,
   createMicrophoneCaptureLifecycle,
+  microphoneEchoMode,
   microphoneErrorKind,
   recoverableMicrophoneError,
 } from '../src/realtime/microphone-capture.js'
@@ -234,4 +236,135 @@ test('normalizes native WebView microphone failures', () => {
   assert.equal(microphoneErrorKind(new Error('permission denied')), 'permission_denied')
   assert.equal(microphoneErrorKind({ name: 'NotFoundError' }), 'device_missing')
   assert.equal(microphoneErrorKind({ name: 'NotReadableError' }), 'device_unavailable')
+})
+
+
+test('microphone uses mandatory system-wide echo cancellation', async () => {
+  const requests = []
+  const media = { getAudioTracks: () => [{ getSettings: () => ({ echoCancellation: 'all' }) }] }
+  const acquired = await acquireEchoCancelledMicrophone({
+    getUserMedia: async request => { requests.push(request); return media },
+  })
+  assert.equal(acquired, media)
+  assert.deepEqual(requests, [{ audio: {
+    noiseSuppression: true, autoGainControl: true, echoCancellation: { exact: 'all' },
+  } }])
+  assert.equal(microphoneEchoMode(acquired), 'all')
+})
+
+test('unsupported all-audio constraint falls back to ordinary echo cancellation', async () => {
+  const requests = []
+  const media = { getAudioTracks: () => [{ getSettings: () => ({ echoCancellation: true }) }] }
+  const acquired = await acquireEchoCancelledMicrophone({
+    getUserMedia: async request => {
+      requests.push(request)
+      if (requests.length === 1) {
+        throw Object.assign(new Error('Unsupported'), {
+          name: 'OverconstrainedError', constraint: 'echoCancellation',
+        })
+      }
+      return media
+    },
+  })
+  assert.equal(acquired, media)
+  assert.equal(requests.length, 2)
+  assert.equal(requests[1].audio.echoCancellation, true)
+  assert.equal(microphoneEchoMode(acquired), 'default')
+})
+
+test('permission and device failures do not silently downgrade echo cancellation', async () => {
+  for (const [name, constraint] of [
+    ['NotAllowedError'], ['SecurityError'], ['NotReadableError'], ['TypeError'],
+  ]) {
+    let calls = 0
+    const failure = Object.assign(new Error(name), { name, constraint })
+    await assert.rejects(acquireEchoCancelledMicrophone({
+      getUserMedia: async () => { calls++; throw failure },
+    }), error => error === failure)
+    assert.equal(calls, 1)
+  }
+})
+
+test('microphone reports actual settings, not requested echo mode', () => {
+  assert.equal(microphoneEchoMode({ getAudioTracks: () => [
+    { getSettings: () => ({ echoCancellation: false }) },
+  ] }), 'off')
+  assert.equal(microphoneEchoMode({ getAudioTracks: () => [
+    { getSettings: () => ({ echoCancellation: 'remote-only' }) },
+  ] }), 'default')
+  assert.equal(microphoneEchoMode({ getAudioTracks: () => [{}] }), 'unknown')
+})
+
+
+test('all-audio fallback handles engines reporting deviceId or missing constraint', async () => {
+  for (const constraint of ['deviceId', undefined]) {
+    let calls = 0
+    const media = {}
+    assert.equal(await acquireEchoCancelledMicrophone({
+      getUserMedia: async request => {
+        if (++calls === 1) throw Object.assign(new Error('Unsupported all'), {
+          name: 'OverconstrainedError', constraint,
+        })
+        assert.equal(request.audio.echoCancellation, true)
+        return media
+      },
+    }), media)
+    assert.equal(calls, 2)
+  }
+})
+
+test('device switching can recover using basic cancellation on the new input', async () => {
+  let requests = 0
+  const ready = []
+  const f = fixture({ acquire: async () => {
+    const media = await acquireEchoCancelledMicrophone({
+      getUserMedia: async () => {
+        if (++requests === 2) throw Object.assign(new Error('Unsupported all'), {
+          name: 'OverconstrainedError', constraint: 'deviceId',
+        })
+        const mode = requests === 1 ? 'all' : true
+        return { getAudioTracks: () => [{ getSettings: () => ({ echoCancellation: mode }) }] }
+      },
+    })
+    ready.push(microphoneEchoMode(media))
+    return capture()
+  } })
+  f.lifecycle.start()
+  await new Promise(resolve => setImmediate(resolve))
+  f.mediaDevices.emit('devicechange')
+  f.clock.runAll()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(ready, ['all', 'default'])
+  assert.equal(f.states.at(-1).state, 'ready')
+  f.lifecycle.stop()
+})
+
+
+test('capture mode is published only for the accepted device acquisition', async () => {
+  const devices = new FakeEventTarget()
+  devices.getUserMedia = () => {}
+  const acquisitions = []
+  const accepted = []
+  const clock = fakeClock()
+  const lifecycle = createMicrophoneCaptureLifecycle({
+    mediaDevices: devices,
+    schedule: clock.schedule,
+    cancel: clock.cancel,
+    acquire: () => new Promise(resolve => acquisitions.push(resolve)),
+    onState: (state, activeCapture) => {
+      if (state.state === 'ready') accepted.push(activeCapture)
+    },
+  })
+  lifecycle.start()
+  const pending = capture()
+  lifecycle.restart('device-change')
+  clock.runAll()
+  const current = capture()
+  acquisitions[1](current)
+  await settle()
+  acquisitions[0](pending)
+  await settle()
+  assert.deepEqual(accepted, [current])
+  assert.equal(pending.track.stopped, 1)
+  lifecycle.stop()
 })

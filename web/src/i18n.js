@@ -1,4 +1,8 @@
 const translations = {
+  '回声消除状态未知，建议使用耳机': 'Echo cancellation unknown; headphones recommended',
+  '系统声音消除模式 · 效果需实测': 'System echo cancellation mode; test with playback',
+  '视频防误听未启用，建议使用耳机': 'Video echo protection off; headphones recommended',
+  '视频防误听：基础模式，建议使用耳机': 'Video echo: basic mode; headphones recommended',
   '正在思考': 'Thinking',
   '已收到，我来看看。': 'Received. Let me take a look.',
   '已收到，正在处理；完成后会告诉你。': 'Received. Working on it; I will let you know when it is done.',

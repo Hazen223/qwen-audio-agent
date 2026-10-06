@@ -28,7 +28,9 @@ import {
 } from './audio.js'
 import { createMicrophoneAudioWorkletNode } from './microphone-audio-worklet.js'
 import {
+  acquireEchoCancelledMicrophone,
   createMicrophoneCaptureLifecycle,
+  microphoneEchoMode,
   microphoneErrorKind,
 } from './microphone-capture.js'
 import { confirmTrackedPlaybackStart } from './playback-lifecycle.js'
@@ -226,6 +228,7 @@ export default function useRealtimeVoice({
     createGatewayClientState,
   )
   const [inputReady, setInputReady] = useState(false)
+  const [echoMode, setEchoMode] = useState('unknown')
   const [imageBufferAvailable, setImageBufferAvailable] = useState(false)
   const additionalCapabilitiesSignature = JSON.stringify(additionalCapabilities)
   const clientToolsSignature = JSON.stringify(clientTools)
@@ -869,6 +872,7 @@ export default function useRealtimeVoice({
     if (!enabled || suspended) {
       inputReadyRef.current = false
       setInputReady(false)
+      setEchoMode('unknown')
       sendSocketEvent(microphoneControlEvent({
         enabled: false,
         inputOnlyMute,
@@ -895,6 +899,7 @@ export default function useRealtimeVoice({
       const message = microphoneErrorText(reason)
       inputReadyRef.current = false
       setInputReady(false)
+      setEchoMode('unknown')
       sendSocketEvent(microphoneControlEvent({
         enabled: false,
         inputOnlyMute,
@@ -922,9 +927,7 @@ export default function useRealtimeVoice({
         const context = audioRef.current
         if (!context) throw unsupportedInput(t('无法初始化实时语音播放'))
         if (context.state === 'suspended') await context.resume()
-        const media = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        })
+        const media = await acquireEchoCancelledMicrophone(navigator.mediaDevices)
         const wakeWordResampler = createStreamingResampler()
         const inputResampler = createStreamingResampler()
         let inputResamplerSocket = null
@@ -1010,14 +1013,17 @@ export default function useRealtimeVoice({
           throw error
         }
       },
-      onState: captureState => {
+      onState: (captureState, activeCapture) => {
+        if (disposed) return
         if (captureState.state === 'ready') {
+          setEchoMode(microphoneEchoMode(activeCapture?.media))
           setError('')
           setVisualError(false)
           setCaptureReady(true)
           return
         }
         setCaptureReady(false)
+        setEchoMode('unknown')
         if (captureState.error && captureState.recoverable) {
           setError(captureState.state === 'unavailable'
             ? t('未检测到可用麦克风，连接设备后会自动恢复')
@@ -1040,6 +1046,7 @@ export default function useRealtimeVoice({
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       inputReadyRef.current = false
       setInputReady(false)
+      setEchoMode('unknown')
       capture.stop()
     }
   }, [
@@ -1160,6 +1167,7 @@ export default function useRealtimeVoice({
     state,
     visualState: visualVoiceState(state),
     inputReady,
+    echoMode,
     imageBufferAvailable,
     error,
     visualError,

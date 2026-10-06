@@ -1,3 +1,28 @@
+// 'all' uses system playback as the echo reference, including other apps.
+// Only unsupported constraints may fall back; permission/device errors stay visible.
+export async function acquireEchoCancelledMicrophone(mediaDevices) {
+  const audio = { noiseSuppression: true, autoGainControl: true }
+  try {
+    return await mediaDevices.getUserMedia({
+      audio: { ...audio, echoCancellation: { exact: 'all' } },
+    })
+  } catch (error) {
+    // This request has just one mandatory constraint. Some engines report
+    // deviceId or no constraint for an unsupported all-audio mode.
+    if (error?.name !== 'OverconstrainedError') {
+      throw error
+    }
+    return mediaDevices.getUserMedia({ audio: { ...audio, echoCancellation: true } })
+  }
+}
+
+export function microphoneEchoMode(media) {
+  const mode = media?.getAudioTracks?.()[0]?.getSettings?.().echoCancellation
+  return mode === 'all' ? 'all'
+    : mode === false ? 'off'
+      : mode === true || mode === 'remote-only' ? 'default' : 'unknown'
+}
+
 const DEFAULT_RETRY_DELAYS = Object.freeze([500, 1_000, 2_000, 4_000])
 
 export function recoverableMicrophoneError(error) {
@@ -115,7 +140,7 @@ export function createMicrophoneCaptureLifecycle({
       currentCapture = capture
       retryAttempt = 0
       installTrackListeners(capture)
-      onState({ state: 'ready', reason })
+      onState({ state: 'ready', reason }, capture)
     } catch (error) {
       if (!running || attemptGeneration !== generation) return
       if (!recoverableMicrophoneError(error)) {

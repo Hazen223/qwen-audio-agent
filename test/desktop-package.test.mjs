@@ -68,3 +68,10 @@ test('macOS release imports the certificate separately and requires a signed bui
   assert.match(cleanup.run, /list-keychains -d user -s/)
   assert.ok(steps.indexOf(cleanup) > steps.indexOf(build))
 })
+
+
+test('macOS capture declares microphone and system audio usage descriptions', () => {
+  const config = parse(readFileSync(new URL('../desktop/electron-builder.yml', import.meta.url), 'utf8'))
+  assert.ok(config.mac.extendInfo.NSMicrophoneUsageDescription)
+  assert.ok(config.mac.extendInfo.NSAudioCaptureUsageDescription)
+})

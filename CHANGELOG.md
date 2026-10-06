@@ -2,6 +2,8 @@
 
 ## Hazen fork — Unreleased
 
+- Prefer system-wide echo cancellation for microphone capture, display the active mode, and retain basic cancellation only when the all-audio constraint is unsupported. Add the macOS system-audio permission description.
+
 - Show immediate in-conversation acknowledgements and accessible thinking dots, with real background progress and automatic factual results.
 - Speak the first real progress update at a natural text boundary, throttle subsequent updates to 20 seconds, and resume parked result delivery without a new user prompt.
 

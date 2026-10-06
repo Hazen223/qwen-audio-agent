@@ -58,6 +58,7 @@ mac:
   notarize: true
   extendInfo:
     LSUIElement: true
+    NSAudioCaptureUsageDescription: Qwen Audio Agent 需要系统音频作为回声参考，以减少视频和扬声器声音被误识别。
     NSMicrophoneUsageDescription: Qwen Audio Agent 需要使用麦克风进行实时语音对话。
   target:
     - dmg

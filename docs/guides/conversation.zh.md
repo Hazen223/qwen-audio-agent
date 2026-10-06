@@ -37,3 +37,12 @@ WebUI 和桌面对话面板支持通过“＋”、拖入或粘贴添加附件�
 
 同一 Gateway 中每个用户只有一个活动客户端。新客户端确认接管后，旧连接会断开。
 桌面版自有 Gateway 与 CLI Gateway 的运行时则默认独立；见[实例与客户端](../operations/gateway.zh.md#实例与客户端)。
+
+
+### 扬声器与视频声音
+
+Hazen Fork 的麦克风采集优先请求 `echoCancellation: { exact: 'all' }`，把本机其他应用播放的声音也纳入回声参考；运行环境不支持这个约束时回退到普通回声消除。对话窗口显示音轨实际报告的模式。它不是声纹识别，也不保证完全消除扬声器泄漏、外部电视或旁人的声音。
+
+macOS 可能要求允许 Qwen Audio Agent 访问系统音频，作为本机回声处理的参考；该参考不会作为独立音轨上传。若系统权限被拒绝，会显示输入错误而不会自动降级掩盖拒绝。某些系统版本即使报告 `all` 也可能没有实际获得系统声音参考，因此需要在扬声器播放视频的同时测试误触发与本人说话的可识别性。基础模式下可使用耳机，或暂时关闭麦克风并继续文字对话。
+
+依据：[MDN 回声消除模式](https://developer.mozilla.org/en-US/docs/Web/API/MediaTrackConstraints/echoCancellation)、[Electron macOS 系统音频权限](https://www.electronjs.org/docs/latest/api/desktop-capturer)、[Chromium 系统音频权限问题](https://issues.chromium.org/issues/480827019)。

@@ -296,6 +296,7 @@ const MOCK_BROWSER_APIS = String.raw`
       trackNumber += 1
       const track = eventListeners({
         muted: false,
+        getSettings() { return { echoCancellation: 'all' } },
         stop() { increment('trackStops') },
       })
       if (location.search.includes('browser-smoke=track-ended') && trackNumber === 1) {
@@ -486,6 +487,7 @@ async function testHappyPath(context, diagnostics) {
   await waitForAttribute(page, 'data-audio-appends', value => Number(value) >= 1)
   await waitForAttribute(page, 'data-playback-starts', value => Number(value) >= 1)
 
+  await page.getByText('系统声音消除模式 · 效果需实测', { exact: true }).waitFor()
   assert.equal(await page.locator('html').getAttribute('data-audio-contexts'), '1')
   assert.equal(await page.locator('html').getAttribute('data-track-stops') || '0', '0')
 
