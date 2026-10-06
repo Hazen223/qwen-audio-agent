@@ -77,87 +77,46 @@ function harness(options = {}) {
   }
 }
 
-test('coalesces Agent message chunks and first speaks after one minute', async () => {
-  const testHarness = harness()
-  testHarness.manager.offer({
-    taskId: 'task_1',
-    startedAt: testHarness.now(),
-    message: '正在读取资料',
-  })
-  await testHarness.advance(30_000)
-  testHarness.manager.offer({
-    taskId: 'task_1',
-    startedAt: 1,
-    message: '正在读取资料并整理关键结论',
-  })
-  await testHarness.advance(29_999)
-  assert.equal(testHarness.calls.length, 0)
-
-  await testHarness.advance(1)
-  assert.equal(testHarness.calls.length, 1)
-  assert.match(testHarness.calls[0][0], /正在读取资料并整理关键结论/)
-  assert.match(testHarness.calls[0][0], /task_id: task_1/)
-  assert.equal(testHarness.calls[0][1], 'progress')
-  assert.deepEqual(testHarness.calls[0][2], {
-    taskId: 'task_1',
-    turnId: 'gateway-turn-1',
-    taskIds: ['task_1'],
-  })
-  assert.match(
-    testHarness.calls[0][3].instructions,
-    /阶段性更新，不是最终结果/,
-  )
-  testHarness.manager.close()
+test('first real progress speaks at a text boundary without waiting a minute', async () => {
+  const h = harness({ quietMs: 800 })
+  h.manager.offer({ taskId: 'task_1', startedAt: h.now(), message: '正在读取' })
+  await h.advance(300)
+  h.manager.offer({ taskId: 'task_1', startedAt: 1, message: '正在读取资料' })
+  await h.advance(499)
+  assert.equal(h.calls.length, 0)
+  await h.advance(1)
+  assert.equal(h.calls.length, 1)
+  assert.match(h.calls[0][0], /正在读取资料/)
+  assert.equal(h.calls[0][1], 'progress')
+  assert.deepEqual(h.calls[0][2], { taskId: 'task_1', turnId: 'gateway-turn-1', taskIds: ['task_1'] })
+  assert.match(h.calls[0][3].instructions, /阶段性更新，不是最终结果/)
+  h.manager.close()
 })
 
-test('applies a session-wide one-minute interval across concurrent tasks', async () => {
-  const testHarness = harness()
-  testHarness.manager.offer({
-    taskId: 'task_1',
-    startedAt: 1,
-    message: '第一项工作的更新',
-  })
-  await testHarness.advance(60_000)
-  assert.equal(testHarness.calls.length, 1)
-
-  testHarness.manager.offer({
-    taskId: 'task_2',
-    startedAt: 1,
-    message: '第二项工作的更新',
-  })
-  await testHarness.advance(59_999)
-  assert.equal(testHarness.calls.length, 1)
-  await testHarness.advance(1)
-  assert.equal(testHarness.calls.length, 2)
-  assert.match(testHarness.calls[1][0], /第二项工作的更新/)
-  testHarness.manager.close()
+test('subsequent concurrent progress remains session-wide rate limited', async () => {
+  const h = harness({ intervalMs: 20_000 })
+  h.manager.offer({ taskId: 'task_1', message: '开始检查' })
+  await h.advance(0)
+  assert.equal(h.calls.length, 1)
+  h.manager.offer({ taskId: 'task_2', message: '另一项工作的进展' })
+  await h.advance(19_999)
+  assert.equal(h.calls.length, 1)
+  await h.advance(1)
+  assert.equal(h.calls.length, 2)
+  h.manager.close()
 })
 
-test('continuous message streaming cannot defer the minute update indefinitely', async () => {
-  const testHarness = harness({ quietMs: 800 })
-  testHarness.manager.offer({
-    taskId: 'task_1',
-    startedAt: 1,
-    message: '开始整理',
-  })
-  await testHarness.advance(59_900)
-  testHarness.manager.offer({
-    taskId: 'task_1',
-    startedAt: 1,
-    message: '持续整理中的最新文本',
-  })
-  await testHarness.advance(700)
-  testHarness.manager.offer({
-    taskId: 'task_1',
-    startedAt: 1,
-    message: '一分钟窗口内的最后文本',
-  })
-  await testHarness.advance(199)
-  assert.equal(testHarness.calls.length, 0)
-  await testHarness.advance(1)
-  assert.equal(testHarness.calls.length, 1)
-  assert.match(testHarness.calls[0][0], /一分钟窗口内的最后文本/)
-  testHarness.manager.close()
+test('continuous streaming cannot defer the first progress indefinitely', async () => {
+  const h = harness({ quietMs: 800 })
+  h.manager.offer({ taskId: 'task_1', message: '开始整理' })
+  await h.advance(600)
+  h.manager.offer({ taskId: 'task_1', message: '持续整理中的最新文本' })
+  await h.advance(199)
+  assert.equal(h.calls.length, 0)
+  await h.advance(1)
+  assert.equal(h.calls.length, 1)
+  assert.match(h.calls[0][0], /持续整理中的最新文本/)
+  h.manager.close()
 })
 
 test('drops pending progress when its task becomes terminal', async () => {
@@ -189,4 +148,17 @@ test('waits while voice delivery is blocked without losing the latest update', a
   assert.equal(testHarness.calls.length, 1)
   assert.match(testHarness.calls[0][0], /等待合适的对话间隙/)
   testHarness.manager.close()
+})
+
+
+test('voice reset removes the previous session cadence', async () => {
+  const h = harness({ quietMs: 800 })
+  h.manager.offer({ taskId: 'task_1', message: '前一会话进展' })
+  await h.advance(800)
+  assert.equal(h.calls.length, 1)
+  h.manager.clear()
+  h.manager.offer({ taskId: 'task_2', message: '新的真实进展' })
+  await h.advance(800)
+  assert.equal(h.calls.length, 2)
+  h.manager.close()
 })

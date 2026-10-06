@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { TaskDomainEvent } from '../task/task-events.mjs'
 
+const TOOL_PROGRESS = { search: '我正在搜索相关资料。', read: '我正在检查相关内容。', write: '我正在修改相关内容。', image: '我正在生成图片。', run: '我正在执行这一步。', bash: '我正在执行这一步。' }
+
 /**
  * Per-frontend-session Task observation and delivery policy. TaskManager remains
  * the state/notification authority; closing this observer never cancels work.
@@ -25,6 +27,7 @@ export class SessionTaskCoordinator {
     this.retryMs = Math.max(100, retryMs)
     this.claimantId = `session_${randomUUID()}`
     this.requests = { permission: new Map(), input: new Map() }
+    this.activityProgress = new Map()
     this.closed = false
     this.retryTimer = null
     this.unsubscribe = null
@@ -176,11 +179,18 @@ export class SessionTaskCoordinator {
     if (task.sessionId !== this.sessionId) return
     this.onTaskEvent(event)
     const state = this.presentation.state()
-    if (event.type === TaskDomainEvent.UPDATED && event.message
+    let progressMessage = event.type === TaskDomainEvent.UPDATED ? event.message : null
+    if (event.type === TaskDomainEvent.PROGRESS) {
+      const tool = task.activity?.findLast(item => item.kind === 'tool' && ['running', 'in_progress'].includes(item.status))
+      const message = TOOL_PROGRESS[tool?.category]
+      if (message && this.activityProgress.get(task.id) !== message) progressMessage = message
+    }
+    if (progressMessage
       && task.authorization?.status !== 'pending' && task.inputRequest?.status !== 'pending'
       && state.outputEnabled && !state.sleeping && !state.waking) {
+      this.activityProgress.set(task.id, progressMessage)
       this.announcements.progress.offer({
-        taskId: task.id, startedAt: task.startedAt, message: event.message,
+        taskId: task.id, startedAt: task.startedAt, message: progressMessage,
       })
     }
     const requested = event.type === TaskDomainEvent.PERMISSION_REQUESTED ? 'permission'
@@ -206,6 +216,7 @@ export class SessionTaskCoordinator {
     }
     if ([TaskDomainEvent.COMPLETED, TaskDomainEvent.FAILED, TaskDomainEvent.CANCELLED]
       .includes(event.type)) {
+      this.activityProgress.delete(task.id)
       this.announcements.progress.remove(task.id)
     }
     if ([TaskDomainEvent.COMPLETED, TaskDomainEvent.FAILED].includes(event.type)) {
@@ -219,6 +230,7 @@ export class SessionTaskCoordinator {
     this.unsubscribe?.()
     this.unsubscribe = null
     this.resetPresentation()
+    this.activityProgress.clear()
     this.announcements.results.close()
     this.announcements.progress.close()
   }

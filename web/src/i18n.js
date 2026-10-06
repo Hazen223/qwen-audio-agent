@@ -1,4 +1,7 @@
 const translations = {
+  '正在思考': 'Thinking',
+  '已收到，我来看看。': 'Received. Let me take a look.',
+  '已收到，正在处理；完成后会告诉你。': 'Received. Working on it; I will let you know when it is done.',
   '待命': 'Standby',
   '正在听': 'Listening',
   '正在说': 'Speaking',

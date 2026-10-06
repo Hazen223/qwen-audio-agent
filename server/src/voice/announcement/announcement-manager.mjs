@@ -349,12 +349,23 @@ export class AnnouncementManager {
   }
 
   async deliver() {
-    if (this.closed || this.delivering) return
+    if (this.closed || this.delivering || this.activeBatch?.responseCompleted) return
     if (this.isDeliveryBlocked()) {
       // Playback completion normally flushes the queue again. Keep a delayed
       // self-wakeup as well: a throttled renderer or a lost playback receipt
       // must not leave a completed task parked in "replying" forever.
-      this.scheduleDelivery(this.retryBaseMs)
+      if (this.activeBatch && !this.activeBatch.responseCompleted) {
+        // Waiting for foreground speech is not a failed injection attempt.
+        if (!this.retryTimer) {
+          this.retryTimer = setTimeout(() => {
+            this.retryTimer = null
+            if (this.activeBatch && !this.activeBatch.responseCompleted) this.deliver()
+          }, this.retryBaseMs)
+          this.retryTimer.unref?.()
+        }
+      } else if (!this.activeBatch) {
+        this.scheduleDelivery(this.retryBaseMs)
+      }
       return
     }
     const frontend = this.getFrontend()
@@ -403,6 +414,7 @@ export class AnnouncementManager {
         // queued behind earlier audio. Delivery is confirmed only when the
         // client reports that playback has actually started.
         batch.responseCompleted = true
+        this.clearRetry()
         this.scheduleAcknowledgementTimeout()
       } else if (this.activeBatch) {
         this.scheduleRetry()

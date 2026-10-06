@@ -562,3 +562,32 @@ test('releases a poison batch after bounded retries so later results can proceed
   manager.confirmMany(['healthy'])
   manager.close()
 })
+
+
+test('parked batch retries after foreground speech without a new prompt or exhausting attempts', async () => {
+  let ready = false
+  let blocked = false
+  let spoken = 0
+  const manager = new AnnouncementManager({
+    getFrontend: () => ({ ready, injectResult: async () => { spoken += 1; return { completed: true } } }),
+    isDeliveryBlocked: () => blocked,
+    batchWindowMs: 0, retryBaseMs: 2, retryMaxMs: 2, maxRetryAttempts: 2,
+  })
+  try {
+    manager.completed({ id: 'parked', objective: '检查', result: '检查完毕' })
+    await waitFor(() => manager.activeBatch !== null)
+    blocked = true
+    ready = true
+    await new Promise(resolve => setTimeout(resolve, 20))
+    assert.equal(spoken, 0)
+    assert.ok(manager.activeBatch)
+    blocked = false
+    manager.flush()
+    await waitFor(() => spoken === 1)
+    await new Promise(resolve => setTimeout(resolve, 15))
+    manager.flush()
+    assert.equal(spoken, 1, 'neither the old timer nor another flush may repeat completed speech')
+    manager.confirmMany(['parked'])
+    assert.equal(manager.activeBatch, null)
+  } finally { manager.close() }
+})

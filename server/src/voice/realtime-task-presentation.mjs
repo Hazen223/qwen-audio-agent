@@ -60,7 +60,7 @@ export function createRealtimeTaskPresentation({
             return state.sleeping || state.waking || !state.outputEnabled || !state.ready || state.busy
           },
           isTaskActive,
-          intervalMs: 60_000,
+          intervalMs: 20_000,
           quietMs: config.announcementQuietMs,
           onError: onProgressError,
         },

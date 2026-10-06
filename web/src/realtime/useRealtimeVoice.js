@@ -651,7 +651,7 @@ export default function useRealtimeVoice({
 
   useEffect(() => {
     const mutedResponses = mutedPlaybackResponses.current
-    const handleEvent = event => {
+    const handleEvent = (event, metadata = {}) => {
       dispatchClientState(event)
       if (event.type === GatewayServerEvent.VOICE_READY) environmentState.setReady(true)
       if (event.type === GatewayServerEvent.VOICE_CONNECTION && event.state !== 'connected') {
@@ -712,7 +712,7 @@ export default function useRealtimeVoice({
         }
       }
       if (event.type === GatewayServerEvent.ERROR) setError(event.message)
-      eventRef.current?.(event)
+      eventRef.current?.(metadata.replayed ? { ...event, replayed: true } : event)
     }
     const client = new GatewayClient({
       url: gatewayRealtimeUrl(sessionId),

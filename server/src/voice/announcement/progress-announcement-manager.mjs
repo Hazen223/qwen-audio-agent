@@ -34,8 +34,8 @@ function progressPayload(candidate) {
  * Coalesces protocol-level Agent messages into low-frequency spoken updates.
  *
  * This component owns presentation timing only. Task liveness comes from the
- * TaskManager and progress content comes from BackendPort MESSAGE events; it
- * never polls a backend or derives narration from tool activity.
+ * TaskManager and content comes from backend messages or verified, public tool
+ * stages supplied by the coordinator; it never polls a backend or uses internal reasoning.
  */
 export class ProgressAnnouncementManager {
   constructor({
@@ -68,7 +68,7 @@ export class ProgressAnnouncementManager {
     this.setTimer = setTimer
     this.clearTimer = clearTimer
     this.candidates = new Map()
-    this.lastAnnouncedAt = 0
+    this.lastAnnouncedAt = null
     this.timer = null
     this.delivering = false
     this.closed = false
@@ -108,6 +108,7 @@ export class ProgressAnnouncementManager {
 
   clear() {
     this.candidates.clear()
+    this.lastAnnouncedAt = null
     try {
       this.getFrontend?.()?.cancelResponses?.((_context, origin) => (
         origin === 'progress'
@@ -135,8 +136,7 @@ export class ProgressAnnouncementManager {
 
   candidateDueAt(candidate) {
     const cadenceDueAt = Math.max(
-      candidate.startedAt + this.intervalMs,
-      this.lastAnnouncedAt + this.intervalMs,
+      this.lastAnnouncedAt === null ? candidate.firstOfferedAt : this.lastAnnouncedAt + this.intervalMs,
       candidate.firstOfferedAt,
       candidate.notBefore || 0,
     )

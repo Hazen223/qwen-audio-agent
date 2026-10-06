@@ -2,6 +2,9 @@
 
 ## Hazen fork — Unreleased
 
+- Show immediate in-conversation acknowledgements and accessible thinking dots, with real background progress and automatic factual results.
+- Speak the first real progress update at a natural text boundary, throttle subsequent updates to 20 seconds, and resume parked result delivery without a new user prompt.
+
 - 增加构建时可选的 `low-latency` 播放配置：远程首播/恢复缓冲 120ms、批次 40ms、批次等待 20ms；默认保持上游的稳健缓冲。
 - 增加长回复完整样本输出、短尾音和打断清空的回归测试。音色与服务端模型配置不变。
 

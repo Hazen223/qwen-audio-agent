@@ -9,11 +9,11 @@ import {
 import {
   buildConversationTurns,
   discardUserTranscript,
-  mergeConversationHistory,
   upsertAssistantTranscript,
   upsertUserTranscript,
 } from './message-order.js'
 import MessageContent from './MessageContent.jsx'
+import { conversationFeedback, presentTaskResult, recoverConversationFeedback, visibleConversationMessages } from './conversation-feedback.js'
 import MultimodalComposer from './composer/MultimodalComposer.jsx'
 import VideoCallPanel from './composer/VideoCallPanel.jsx'
 import { desktopClientTools } from './desktop/client-tools.js'
@@ -97,6 +97,7 @@ const activeClientType = gatewayClientType(desktopOrbMode ? 'desktop' : 'web')
 const activeClientInstanceId = gatewayClientInstanceId()
 const compactVoiceControl = desktopOrbMode || activeClientType === 'mobile'
 const composerEnabled = supportsComposerInput(activeClientType)
+const THINKING_TASK_PHASES = ['queued', 'running', 'delegated', 'finalizing', 'cancelling']
 const MODEL_INPUT_MODE_ORDER = ['text', 'image', 'video', 'audio']
 const MODEL_INPUT_MODE_LABELS = {
   text: 'Text',
@@ -222,6 +223,7 @@ export default function App() {
   const [waitingForVoice, setWaitingForVoice] = useState(false)
   const [videoCallOpen, setVideoCallOpen] = useState(false)
   const [messages, setMessages] = useState([])
+  const [feedback, setFeedback] = useState(null)
   const [activity, setActivity] = useState(t('正在检查后台 Agent'))
   const [frontend, setFrontend] = useState({ label: 'Realtime Agent' })
   const [modelStatus, setModelStatus] = useState(() => realtimeModelStatus())
@@ -422,7 +424,7 @@ export default function App() {
     if (container && stickToBottom.current) {
       container.scrollTop = container.scrollHeight
     }
-  }, [messages, agentTasks, desktopSurfaceMode, sessionId])
+  }, [messages, agentTasks, feedback, desktopSurfaceMode, sessionId])
 
   useEffect(() => () => {
     taskDismissTimers.current.forEach(timer => clearTimeout(timer))
@@ -460,7 +462,10 @@ export default function App() {
           error: backendPayload.error || '',
           url: payload.backend?.uiPath || payload.backend?.baseUrl || '',
         })
-        setActivity(response.ok ? t('Gateway 已连接') : t('能力服务尚未连接'))
+        setActivity(current => response.ok
+          ? [t('正在检查后台 Agent'), t('qwen-audio-agent Gateway 尚未连接')].includes(current)
+            ? t('Gateway 已连接') : current
+          : t('能力服务尚未连接'))
         if (desktopOrbMode) {
           const backendSettled = !backendEnabled || [
             'ready',
@@ -512,6 +517,10 @@ export default function App() {
   }, [])
 
   const onRealtimeEvent = useCallback(event => {
+    setFeedback(current => conversationFeedback(current, event, currentTurnId.current))
+    if (['task.completed', 'task.failed'].includes(event.type)) {
+      setMessages(items => presentTaskResult(items, event.task))
+    }
     const animationEvent = spriteAnimationEventForGatewayEvent(event)
     if (animationEvent) {
       triggerSpriteAnimation(animationEvent)
@@ -552,7 +561,7 @@ export default function App() {
     }
     if (event.type === 'session.recovered') {
       if (sessionIdRef.current !== sessionId) return
-      setMessages(items => mergeConversationHistory(items, event.messages || []))
+      setMessages(items => recoverConversationFeedback(items, event.messages || [], event.tasks || []))
       const serverTasks = event.tasks || []
       const byId = new Map(serverTasks.map(task => [task.id, task]))
       setAgentTasks(items => {
@@ -1112,6 +1121,7 @@ export default function App() {
     localStorage.setItem('qwen-audio-agent.session', next)
     setSessionId(next)
     setMessages([])
+    setFeedback(null)
     setAgentTasks([])
     currentTurnId.current = ''
     activeVoiceResponse.current = ''
@@ -1144,11 +1154,17 @@ export default function App() {
     // Sending is a browser user gesture, so it is also the earliest reliable
     // point to unlock audio playback while the microphone remains muted.
     voice.activateAudio()
-    return voice.sendInput(parts)
+    const sent = voice.sendInput(parts)
+    if (sent) {
+      stickToBottom.current = true
+      setFeedback(current => conversationFeedback(current, { type: 'input.submitted' }))
+      setActivity(t('已收到，我来看看。'))
+    }
+    return sent
   }
 
   const turns = useMemo(
-    () => buildConversationTurns(messages, agentTasks),
+    () => buildConversationTurns(visibleConversationMessages(messages), agentTasks),
     [messages, agentTasks],
   )
 
@@ -1385,6 +1401,16 @@ export default function App() {
     </div>}
   </aside>
 
+  const renderFeedback = (key, text) => <article
+    key={key}
+    className="assistant conversation-feedback"
+    role="status"
+    aria-label={t('正在思考')}
+  >
+    <label>qwen-audio</label>
+    <p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span>{text}</p>
+  </article>
+
   const renderMessage = message => <article
     key={message.id}
     className={`${message.role}${message.companion ? ' companion' : ''}`}
@@ -1512,7 +1538,7 @@ export default function App() {
           )
         }}
       >
-        {!turns.length && <div className="empty">
+        {!turns.length && !feedback && <div className="empty">
           <b>{t('试着说')}</b>
           <span>{t('“帮我查一下今天的 AI 新闻，并整理成三点摘要。”')}</span>
         </div>}
@@ -1523,7 +1549,15 @@ export default function App() {
           {turn.beforeActivities.map(renderMessage)}
           {turn.tasks.map(renderTask)}
           {turn.afterActivities.map(renderMessage)}
+          {turn.tasks.filter(task => THINKING_TASK_PHASES.includes(task.phase)
+            && task.authorization?.status !== 'pending' && task.inputRequest?.status !== 'pending')
+            .map(task => renderFeedback(`thinking:${task.id}`, (task.message || task.activity?.length) ? taskDetail(task) : t('已收到，正在处理；完成后会告诉你。')
+            ))}
+          {feedback?.turnId === turn.id
+            && !turn.tasks.some(task => THINKING_TASK_PHASES.includes(task.phase)) && renderFeedback(`thinking:${turn.id}`, t('已收到，我来看看。'))}
         </section>)}
+        {feedback && !turns.some(turn => turn.id === feedback.turnId)
+          && renderFeedback('thinking:pending', t('已收到，我来看看。'))}
       </div>
 
       {videoCallSupported && videoCallOpen && <div className="visual-stream-dock">

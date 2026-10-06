@@ -324,3 +324,21 @@ test('user Task kinds share result delivery while system jobs stay outside the f
   assert.equal(h.injectCalls.length, 3)
   assert.equal(h.events.length, count)
 })
+
+
+test('important real tool stages produce concise progress while private thinking never speaks', async t => {
+  const h = harness(t)
+  const run = await startTask(h)
+  const event = activity => ({ type: 'task.progress', ownerId: h.ownerId,
+    task: { ...h.taskManager.get(run.task.id), activity } })
+  h.coordinator.handleEvent(event([{ kind: 'thinking', status: 'running', detail: 'private chain' }]))
+  assert.equal(h.coordinator.announcements.progress.candidates.size, 0)
+  h.coordinator.handleEvent(event([{ id: 'read', kind: 'tool', status: 'running', category: 'read', detail: 'private path' }]))
+  assert.equal(h.coordinator.announcements.progress.candidates.get(run.task.id).message, '我正在检查相关内容。')
+  const version = h.coordinator.announcements.progress.candidates.get(run.task.id).version
+  h.coordinator.handleEvent(event([{ id: 'read2', kind: 'tool', status: 'running', category: 'read' }]))
+  assert.equal(h.coordinator.announcements.progress.candidates.get(run.task.id).version, version)
+  permission(run)
+  h.coordinator.handleEvent(event([{ id: 'write', kind: 'tool', status: 'running', category: 'write' }]))
+  assert.equal(h.coordinator.announcements.progress.candidates.size, 0)
+})

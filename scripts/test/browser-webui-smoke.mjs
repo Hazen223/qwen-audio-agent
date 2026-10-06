@@ -366,6 +366,7 @@ const MOCK_BROWSER_APIS = String.raw`
     }
   }
   window.browserSmoke = {
+    event(event) { serverEvent(state.activeSocket, event) },
     sleepTool() {
       document.documentElement.dataset.actionResult = ''
       serverEvent(state.activeSocket, { type: 'client.action.request',
@@ -769,6 +770,40 @@ async function testCameraPermission(context, diagnostics) {
   await finishPage(unsupported, diagnostics)
 }
 
+async function testConversationFeedback(context, diagnostics) {
+  const page = await preparePage(context, '?desktop=orb&surface=panel&autoHideSeconds=0&browser-smoke=feedback', diagnostics)
+  await page.waitForFunction(() => browserSmoke.connection().ready)
+  const emit = event => page.evaluate(event => browserSmoke.event(event), event)
+  await page.locator('.composer-row textarea').fill('请检查资料，然后告诉我结果')
+  await page.getByRole('button', { name: '发送', exact: true }).click()
+  const feedback = page.locator('.conversation-feedback')
+  await feedback.waitFor({ state: 'visible' })
+  assert.match(await feedback.innerText(), /已收到/)
+  assert.equal(await feedback.locator('.thinking-dots i').count(), 3)
+  await emit({ type: 'turn.started', turnId: 'feedback-turn' })
+  await emit({ type: 'transcript.final', role: 'user', turnId: 'feedback-turn', content: '请检查资料，然后告诉我结果' })
+  await emit({ type: 'voice.state', state: 'processing', turnId: 'feedback-turn', origin: 'model' })
+  const task = { id: 'feedback-task', turnId: 'feedback-turn', objective: '检查资料', status: 'queued', workState: 'submitted' }
+  await emit({ type: 'task.accepted', task })
+  await emit({ type: 'task.updated', task: { ...task, status: 'running', workState: 'working', message: '我正在检查相关资料。' } })
+  await page.waitForFunction(() => document.querySelector('.conversation-feedback')?.textContent.includes('正在检查'))
+  assert.equal(await feedback.count(), 1, 'one indicator for one task turn')
+  const animation = await feedback.locator('.thinking-dots i').first().evaluate(node => getComputedStyle(node).animationName)
+  assert.equal(animation, 'thinking-dot')
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  assert.equal(await feedback.locator('.thinking-dots i').first().evaluate(node => getComputedStyle(node).animationName), 'none')
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await page.waitForFunction(() => [...document.querySelectorAll('.conversation-turn')].every(node => getComputedStyle(node).opacity === '1'))
+  if (process.env.QWEN_FEEDBACK_SCREENSHOT) await page.screenshot({ path: process.env.QWEN_FEEDBACK_SCREENSHOT })
+  await emit({ type: 'task.completed', task: { ...task, status: 'completed', workState: 'completed', result: '检查完成，三处引用全部通过。', notificationStatus: 'pending' } })
+  await feedback.waitFor({ state: 'detached' })
+  await page.locator('article.assistant.companion').filter({ hasText: '三处引用全部通过' }).waitFor()
+  // No new input or task.get: completion alone delivers the visible answer.
+  await emit({ type: 'task.completed', task: { ...task, status: 'completed', result: '检查完成，三处引用全部通过。' } })
+  assert.equal(await page.locator('article.assistant.companion').count(), 1)
+  await finishPage(page, diagnostics)
+}
+
 let server
 let browser
 let context
@@ -786,6 +821,7 @@ try {
   context = await browser.newContext({ locale: 'zh-CN' })
   await context.tracing.start({ screenshots: true, snapshots: true, sources: true })
   tracingActive = true
+  await testConversationFeedback(context, diagnostics)
   await testHappyPath(context, diagnostics)
   await testBrowserLanguage(context, diagnostics)
   await testReconnectInterruptsPlayback(context, diagnostics)

@@ -32,3 +32,11 @@ VITE_QWEN_AUDIO_PLAYBACK_PROFILE=low-latency npm run build
 For desktop packaging changes also run `npm run test:desktop-package`, using isolated configuration, before replacing an installed application. Do not build with or commit production .env files, device credentials, voice reference clips, model weights, logs or task history.
 
 The playback queue cannot recover speech that a synthesis service never generated. Server-side length-aware TTS segmentation and prompt-cache fixes must be tracked with that service independently. Keep those versions pinned and validate complete audio, interruption and reconnect behavior together.
+
+## Conversation feedback
+
+Accepted text inputs and finalized speech show an ephemeral acknowledgement and thinking dots in the conversation. Real task messages and tool activity supply subsequent status; the indicator does not expose private reasoning or invent searches. Terminal, interrupted, reset and disconnected turns stop the indicator. Reduced-motion users see static dots.
+
+Task completion/failure events immediately display the factual result without polling or another question. Replayed events are deduplicated. The original completion speech still uses the configured cloned voice and waits for foreground speech/playback to finish; its redundant textual summary is hidden when the full result is already present.
+
+The first actual backend message can be spoken after the existing natural-text debounce; later progress updates have a session-wide 20-second interval. Verified running search/read/write/image/command stages also supply short, deduplicated progress phrases when a backend sends no commentary. Private thinking events and raw paths/commands are never used for spoken progress. A parked result batch now rechecks voice availability without consuming failure retries.
