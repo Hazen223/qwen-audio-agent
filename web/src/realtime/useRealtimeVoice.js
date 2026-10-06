@@ -24,6 +24,7 @@ import {
   createStreamingResampler,
   decodePcm,
   pcmBase64,
+  pcmPlaybackBufferOptions,
 } from './audio.js'
 import { createMicrophoneAudioWorkletNode } from './microphone-audio-worklet.js'
 import {
@@ -627,6 +628,8 @@ export default function useRealtimeVoice({
     if (!playback.queue) {
       playback.queue = createPcmPlaybackQueue({
         remote: gatewayTransportIsRemote(),
+        // Modified in Hazen223 fork: the build chooses the playback profile.
+        ...pcmPlaybackBufferOptions(import.meta.env?.VITE_QWEN_AUDIO_PLAYBACK_PROFILE),
         onFlush: items => items.forEach(scheduleAudioItem),
       })
     }

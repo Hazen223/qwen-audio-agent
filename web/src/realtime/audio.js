@@ -273,6 +273,18 @@ export function mergePcmPlaybackItems(items = []) {
   })
 }
 
+// Modified in Hazen223 fork: opt-in playback buffering for local voice services.
+export function pcmPlaybackBufferOptions(profile) {
+  if (profile !== 'low-latency') return {}
+  return {
+    initialBufferSeconds: 0.12,
+    resumeBufferSeconds: 0.12,
+    lowWaterSeconds: 0.04,
+    batchSeconds: 0.04,
+    batchDelayMs: 20,
+  }
+}
+
 /**
  * Buffers bursty PCM delivery without coupling playback to a transport. Local
  * clients flush every chunk immediately. Remote clients build an initial

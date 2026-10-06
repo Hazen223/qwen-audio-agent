@@ -6,6 +6,7 @@ import {
   createRealtimeAudioSendController,
   createStreamingResampler,
   mergePcmPlaybackItems,
+  pcmPlaybackBufferOptions,
   resample,
 } from '../src/realtime/audio.js'
 
@@ -232,4 +233,54 @@ test('remote PCM playback flushes a short response when it finishes', () => {
   assert.equal(flushed.length, 0)
   queue.finish()
   assert.equal(flushed.length, 1)
+})
+
+// Modified in Hazen223 fork: regressions for the opt-in local voice profile.
+test('low-latency PCM profile starts at 120 ms while defaults retain 400 ms', () => {
+  const chunk = index => ({
+    samples: new Float32Array(32).fill(index), sampleRate: 1000,
+    responseId: 'story', duration: 0.032,
+  })
+  for (const [profile, expectedChunks] of [['balanced', 13], ['low-latency', 4], ['unknown', 13]]) {
+    const output = []
+    const queue = createPcmPlaybackQueue({ remote: true,
+      ...pcmPlaybackBufferOptions(profile), onFlush: items => output.push(...items) })
+    for (let index = 0; index < expectedChunks - 1; index++) queue.push(chunk(index))
+    assert.equal(output.length, 0, profile)
+    queue.push(chunk(expectedChunks - 1))
+    assert.equal(output.length, 1, profile)
+    assert.equal(output[0].samples.length, expectedChunks * 32)
+  }
+})
+
+test('low-latency profile preserves every sample and flushes a long response tail', () => {
+  const output = []
+  const queue = createPcmPlaybackQueue({ remote: true,
+    ...pcmPlaybackBufferOptions('low-latency'), onFlush: items => output.push(...items) })
+  for (let index = 0; index < 625; index++) {
+    queue.push({ samples: new Float32Array(32).fill(index), sampleRate: 1000,
+      responseId: 'long-story', duration: 0.032 }, { timelineAheadSeconds: 1 })
+  }
+  queue.finish()
+  const samples = output.flatMap(item => [...item.samples])
+  assert.equal(samples.length, 20_000)
+  for (let index = 0; index < 625; index++) {
+    assert.deepEqual(samples.slice(index * 32, (index + 1) * 32), Array(32).fill(index))
+  }
+  assert.ok(output.every(item => item.responseId === 'long-story' && item.sampleRate === 1000))
+})
+
+test('low-latency interruption discards queued old audio and plays a short new tail', () => {
+  const output = []
+  const queue = createPcmPlaybackQueue({ remote: true,
+    ...pcmPlaybackBufferOptions('low-latency'), onFlush: items => output.push(...items) })
+  queue.push({ samples: new Float32Array(32).fill(1), sampleRate: 1000,
+    responseId: 'cancelled', duration: 0.032 })
+  queue.reset()
+  queue.push({ samples: new Float32Array(32).fill(2), sampleRate: 1000,
+    responseId: 'new', duration: 0.032 })
+  queue.finish()
+  assert.equal(output.length, 1)
+  assert.equal(output[0].responseId, 'new')
+  assert.deepEqual([...output[0].samples], Array(32).fill(2))
 })
